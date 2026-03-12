@@ -1,0 +1,14 @@
+<launch>
+    <!-- 1. 启动C++发布节点 -->
+    <node name="send_fixed_goal_node" pkg="send_fixed_goal" type="send_fixed_goal_node" output="screen">
+        <!-- 2. 可配置参数：目标点坐标（单位：米），直接改数值即可 -->
+        <param name="goal_x" value="10" type="double"/>
+        <param name="goal_y" value="0" type="double"/>
+        <param name="goal_z" value="0" type="double"/>
+        <!-- 3. 可配置参数：坐标系（与SLAM/地图一致，如map/world/odom） -->
+        <param name="frame_id" value="map" type="string"/>
+        <!-- 4. 可选参数：是否循环发布（true/false），循环频率（Hz） -->
+        <param name="is_cycle" value="false" type="bool"/>
+        <param name="cycle_hz" value="0.2" type="double"/> <!-- 0.2Hz=5秒/次，1Hz=1秒/次 -->
+    </node>
+</launch>

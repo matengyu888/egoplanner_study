@@ -284,12 +284,14 @@ namespace ego_planner
     return true;
   }
 
+  //基于航点生成全局多项式轨迹的核心函数，是无人机全局路径规划的底层实现。它的核心目标是：将「起点 + 预设航点」转换成平滑、最小冲击（min snap） 的多项式轨迹（无人机可跟踪的连续轨迹）
   bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                                   const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
     // generate global reference trajectory
 
+    //拼接起点和航点，形成原始点列
     vector<Eigen::Vector3d> points;
     points.push_back(start_pos);
 
@@ -298,6 +300,7 @@ namespace ego_planner
       points.push_back(waypoints[wp_i]);
     }
 
+    //计算路径总长度，为后续插值做准备
     double total_len = 0;
     total_len += (start_pos - waypoints[0]).norm();
     for (size_t i = 0; i < waypoints.size() - 1; i++)
@@ -305,6 +308,7 @@ namespace ego_planner
       total_len += (waypoints[i + 1] - waypoints[i]).norm();
     }
 
+    //插入中间点（核心：加密点列，保证轨迹平滑）
     // insert intermediate points if too far
     vector<Eigen::Vector3d> inter_points;
     double dist_thresh = max(total_len / 8, 4.0);
@@ -335,6 +339,7 @@ namespace ego_planner
     // }
 
     // write position matrix
+    //构建位置矩阵，分配各段轨迹的时间
     int pt_num = inter_points.size();
     Eigen::MatrixXd pos(3, pt_num);
     for (int i = 0; i < pt_num; ++i)
@@ -346,34 +351,41 @@ namespace ego_planner
     {
       time(i) = (pos.col(i + 1) - pos.col(i)).norm() / (pp_.max_vel_);
     }
-
+    // 特殊处理：第一段和最后一段时间×2（让起点/终点加速/减速更平缓
     time(0) *= 2.0;
     time(time.rows() - 1) *= 2.0;
 
+    //生成多项式轨迹（核心算法）
     PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
+    //情况1：点数≥3 → 生成最小冲击（min snap）轨迹（多段多项式）
       gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
     else if (pos.cols() == 2)
+    //情况2：点数=2（只有起点+终点）→ 生成单段多项式轨迹
       gl_traj = PolynomialTraj::one_segment_traj_gen(start_pos, start_vel, start_acc, pos.col(1), end_vel, end_acc, time(0));
     else
       return false;
 
+    //保存全局轨迹并返回成功
     auto time_now = ros::Time::now();
     global_data_.setGlobalTraj(gl_traj, time_now);
 
     return true;
   }
 
+  //针对「单点目标」生成全局多项式轨迹的核心函数（区别于多航点的 planGlobalTrajWaypoints），专门处理「起点→单个终点」的轨迹规划场景（比如手动输入单个目标点）。
+  //它的逻辑和多航点版本高度相似，但做了简化适配
   bool EGOPlannerManager::planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                          const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
     // generate global reference trajectory
-
+    //1. 构建原始点列（极简版）
     vector<Eigen::Vector3d> points;
     points.push_back(start_pos);
     points.push_back(end_pos);
 
+    //2. 插入中间点（固定阈值）
     // insert intermediate points if too far
     vector<Eigen::Vector3d> inter_points;
     const double dist_thresh = 4.0;
@@ -398,6 +410,7 @@ namespace ego_planner
 
     inter_points.push_back(points.back());
 
+    //3. 构建位置矩阵与时间分配（逻辑完全复用）
     // write position matrix
     int pt_num = inter_points.size();
     Eigen::MatrixXd pos(3, pt_num);
@@ -414,6 +427,7 @@ namespace ego_planner
     time(0) *= 2.0;
     time(time.rows() - 1) *= 2.0;
 
+    //4. 生成多项式轨迹（适配单点场景）
     PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
       gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
