@@ -12,9 +12,12 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   geometry_msgs
+  pcl_ros
   pcl_conversions
 )
-find_package(PCL REQUIRED)
+#find_package(PCL REQUIRED)
+#find_package(PCL REQUIRED PATHS /opt/ros/noetic/lib/cmake/PCL NO_DEFAULT_PATH)
+
 find_package(Eigen3 REQUIRED)
 
 catkin_package()
@@ -23,10 +26,11 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
-  ${PCL_INCLUDE_DIRS}
+  #${PCL_INCLUDE_DIRS}
 )
 
 add_executable (random_forest src/random_forest_sensing.cpp )
 target_link_libraries(random_forest
   ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES})
+  #${PCL_LIBRARIES}
+  )

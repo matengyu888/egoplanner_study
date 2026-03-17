@@ -7,7 +7,7 @@ ADD_COMPILE_OPTIONS(-std=c++14 )
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL 1.7 REQUIRED)
+#find_package(PCL 1.7 REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -16,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
   plan_env
   cv_bridge
+  pcl_ros
 )
 
 
@@ -31,7 +32,7 @@ include_directories(
     include 
     ${catkin_INCLUDE_DIRS}
     ${Eigen3_INCLUDE_DIRS} 
-    ${PCL_INCLUDE_DIRS}
+    #${PCL_INCLUDE_DIRS}
 )
 
 add_library( path_searching 

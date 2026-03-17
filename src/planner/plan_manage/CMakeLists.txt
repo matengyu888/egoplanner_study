@@ -7,7 +7,7 @@ ADD_COMPILE_OPTIONS(-std=c++14 )
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL 1.7 REQUIRED)
+#find_package(PCL 1.7 REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -20,6 +20,7 @@ find_package(catkin REQUIRED COMPONENTS
   traj_utils
   message_generation
   cv_bridge
+  pcl_ros
 )
 
 # Generate messages in the 'msg' folder
@@ -49,7 +50,7 @@ include_directories(
   SYSTEM
   ${catkin_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
-  ${PCL_INCLUDE_DIRS}
+  #${PCL_INCLUDE_DIRS}
 )
 
 

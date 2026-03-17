@@ -1,39 +1,35 @@
 <launch>
-  <!-- size of map, change the size inflate x, y, z according to your application -->
-  <arg name="map_size_x" value="100.0"/> <!-- 改动：RMUA地图更大 -->
+  <!-- RMUA 地图尺寸 -->
+  <arg name="map_size_x" value="100.0"/>
   <arg name="map_size_y" value="100.0"/>
   <arg name="map_size_z" value="5.0"/>
 
-  <!-- ######################################################################### -->
-  <!-- 改动1：里程计话题 → 使用 RMUA 真值 /airsim_node/drone_1/debug/pose_gt     -->
-  <!-- ######################################################################### -->
+  <!-- 里程计：RMUA 真值 -->
   <arg name="odom_topic" value="/airsim_node/drone_1/debug/pose_gt" />
 
-  <!-- main algorithm params -->
+  <!-- 主参数 -->
   <include file="$(find ego_planner)/launch/advanced_param.xml">
-
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
     <arg name="odometry_topic" value="$(arg odom_topic)"/>
 
-    <!-- ######################################################################### -->
-    <!-- 改动3：使用 RMUA 雷达话题 /airsim_node/drone_1/lidar -->
-    <!-- ######################################################################### -->
+    <!-- 关闭相机：给无效占位符，不启用 -->
+    <arg name="camera_pose_topic" value="/unused" />
+    <arg name="depth_topic" value="/unused" />
+    <arg name="cx" value="0" />
+    <arg name="cy" value="0" />
+    <arg name="fx" value="0" />
+    <arg name="fy" value="0" />
+
+    <!-- 雷达话题 -->
     <arg name="cloud_topic" value="/airsim_node/drone_1/lidar" />
 
-    <!-- maximum velocity and acceleration the drone will reach -->
     <arg name="max_vel" value="2.0" />
     <arg name="max_acc" value="3.0" />
+    <arg name="planning_horizon" value="7.5" />
+    <arg name="flight_type" value="1" />
 
-    <!--always set to 1.5 times grater than sensing horizen-->
-    <arg name="planning_horizon" value="7.5" /> 
-
-    <!-- 1: use 2D Nav Goal to select goal  -->
-    <!-- 2: use global waypoints below  -->
-    <arg name="flight_type" value="2" />
-    
-    <!-- global waypoints -->
     <arg name="point_num" value="5" />
     <arg name="point0_x" value="-15.0" />
     <arg name="point0_y" value="0.0" />
@@ -50,26 +46,21 @@
     <arg name="point4_x" value="-15.0" />
     <arg name="point4_y" value="0.0" />
     <arg name="point4_z" value="1.0" />
-    
   </include>
 
-  <!-- trajectory server -->
+  <!-- 轨迹服务器 -->
   <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen">
-    <remap from="/position_cmd" to="planning/pos_cmd"/>
+    <remap from="/position_cmd" to="/planning/pos_cmd"/>
     <remap from="/odom_world" to="$(arg odom_topic)"/>
-
-      <!-- 👇 这里加一行 remap，直接把输出话题换成 RMUA 需要的 -->
-    <remap from="/position_cmd" to="/airsim_node/drone_1/vel_cmd_body_frame"/>    
-    
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>
 
+  <!-- 航点生成器 -->
   <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
-    <remap from="~odom" to="$(arg odom_topic)"/>        
+    <remap from="~odom" to="$(arg odom_topic)"/>
     <remap from="~goal" to="/move_base_simple/goal"/>
     <remap from="~traj_start_trigger" to="/traj_start_trigger" />
-    <param name="waypoint_type" value="manual-lonely-waypoint"/>    
+    <param name="waypoint_type" value="manual-lonely-waypoint"/>
   </node>
-
 
 </launch>

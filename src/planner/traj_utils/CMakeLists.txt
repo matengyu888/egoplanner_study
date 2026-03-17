@@ -11,10 +11,11 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   cv_bridge
+  pcl_ros
 )
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL 1.7 REQUIRED)
+#find_package(PCL 1.7 REQUIRED)
 
 catkin_package(
  INCLUDE_DIRS include
@@ -28,7 +29,7 @@ include_directories(
     include 
     ${catkin_INCLUDE_DIRS}
     ${Eigen3_INCLUDE_DIRS} 
-    ${PCL_INCLUDE_DIRS}
+    #${PCL_INCLUDE_DIRS}
 )
 
 link_directories(${PCL_LIBRARY_DIRS})

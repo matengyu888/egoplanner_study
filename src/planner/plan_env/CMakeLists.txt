@@ -16,10 +16,11 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
   cv_bridge
   message_filters
+  pcl_ros
 )
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL 1.7 REQUIRED)
+#find_package(PCL 1.7 REQUIRED)
 
 catkin_package(
  INCLUDE_DIRS include
@@ -33,7 +34,7 @@ include_directories(
     include 
     ${catkin_INCLUDE_DIRS}
     ${Eigen3_INCLUDE_DIRS} 
-    ${PCL_INCLUDE_DIRS}
+    #${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -45,5 +46,5 @@ add_library( plan_env
     )
 target_link_libraries( plan_env
     ${catkin_LIBRARIES} 
-    ${PCL_LIBRARIES}
+    #${PCL_LIBRARIES}
     )  
