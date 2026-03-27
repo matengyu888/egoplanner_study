@@ -10,6 +10,8 @@ find_package(Eigen3 REQUIRED)
 #find_package(PCL 1.7 REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
+  airsim_ros
+  nav_msgs
   roscpp
   std_msgs
   geometry_msgs
@@ -21,6 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   cv_bridge
   pcl_ros
+  pcl_conversions
 )
 
 # Generate messages in the 'msg' folder
@@ -41,7 +44,7 @@ generate_messages(
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES ego_planner
- CATKIN_DEPENDS plan_env path_searching bspline_opt traj_utils message_runtime
+ CATKIN_DEPENDS airsim_ros nav_msgs plan_env path_searching bspline_opt traj_utils message_runtime
 #  DEPENDS system_lib
 )
 
@@ -68,4 +71,18 @@ add_executable(traj_server src/traj_server.cpp)
 target_link_libraries(traj_server ${catkin_LIBRARIES})
 add_dependencies(traj_server ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
+add_executable(rmua_bridge_node src/rmua_bridge.cpp)
+target_link_libraries(rmua_bridge_node ${catkin_LIBRARIES})
+add_dependencies(rmua_bridge_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+add_executable(rmua_poscmd_bridge_node src/rmua_poscmd_bridge.cpp)
+target_link_libraries(rmua_poscmd_bridge_node ${catkin_LIBRARIES})
+add_dependencies(rmua_poscmd_bridge_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+add_executable(rmua_vel_topic_bridge_node src/rmua_vel_topic_bridge.cpp)
+target_link_libraries(rmua_vel_topic_bridge_node ${catkin_LIBRARIES})
+add_dependencies(rmua_vel_topic_bridge_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+add_executable(rmua_route_goal_publisher_node src/rmua_route_goal_publisher.cpp)
+target_link_libraries(rmua_route_goal_publisher_node ${catkin_LIBRARIES})
+add_dependencies(rmua_route_goal_publisher_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})

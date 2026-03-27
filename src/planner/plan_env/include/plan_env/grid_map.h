@@ -80,6 +80,7 @@ struct MappingParameters {
 
   /* active mapping */
   double unknown_flag_;
+  bool treat_out_of_map_as_free_;
 };
 
 // intermediate mapping data for fusion
@@ -308,7 +309,7 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ) {
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3d pos) {
-  if (!isInMap(pos)) return -1;
+  if (!isInMap(pos)) return mp_.treat_out_of_map_as_free_ ? 0 : -1;
 
   Eigen::Vector3i id;
   posToIndex(pos, id);
@@ -317,7 +318,7 @@ inline int GridMap::getOccupancy(Eigen::Vector3d pos) {
 }
 
 inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos) {
-  if (!isInMap(pos)) return -1;
+  if (!isInMap(pos)) return mp_.treat_out_of_map_as_free_ ? 0 : -1;
 
   Eigen::Vector3i id;
   posToIndex(pos, id);
@@ -328,7 +329,7 @@ inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos) {
 inline int GridMap::getOccupancy(Eigen::Vector3i id) {
   if (id(0) < 0 || id(0) >= mp_.map_voxel_num_(0) || id(1) < 0 || id(1) >= mp_.map_voxel_num_(1) ||
       id(2) < 0 || id(2) >= mp_.map_voxel_num_(2))
-    return -1;
+    return mp_.treat_out_of_map_as_free_ ? 0 : -1;
 
   return md_.occupancy_buffer_[toAddress(id)] > mp_.min_occupancy_log_ ? 1 : 0;
 }

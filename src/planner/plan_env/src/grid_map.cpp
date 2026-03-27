@@ -41,6 +41,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
 
   node_.param("grid_map/visualization_truncate_height", mp_.visualization_truncate_height_, 999.0);
   node_.param("grid_map/virtual_ceil_height", mp_.virtual_ceil_height_, -0.1);
+  node_.param("grid_map/treat_out_of_map_as_free", mp_.treat_out_of_map_as_free_, false);
 
   node_.param("grid_map/show_occ_time", mp_.show_occ_time_, false);
   node_.param("grid_map/pose_type", mp_.pose_type_, 1);

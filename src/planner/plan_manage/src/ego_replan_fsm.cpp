@@ -9,8 +9,11 @@ namespace ego_planner
     //状态机核心变量初始化
     current_wp_ = 0;//当前跟踪的航电索引，初始化为第0个
     exec_state_ = FSM_EXEC_STATE::INIT;//状态机执行状态，初始化为“初始化”
+    trigger_ = false;
     have_target_ = false;//是否收到目标点，初始无
     have_odom_ = false;//是否收到里程计信息，初始无
+    have_new_target_ = false;
+    flag_escape_emergency_ = false;
 
     /*  fsm param  */
 
@@ -145,7 +148,7 @@ namespace ego_planner
     //3. 提取目标点并调用规划器生成轨迹
     //与之前 planGlobalTrajWaypoints 的区别：这里是「单点目标」（起点→终点），而非「多航点序列」，调用的是 planGlobalTraj 接口，更轻量化
     bool success = false;
-    end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y, 1.0;
+    end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y, msg->poses[0].pose.position.z;
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), end_pt_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     //4. 可视化目标点

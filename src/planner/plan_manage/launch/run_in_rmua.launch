@@ -2,10 +2,11 @@
   <!-- RMUA 地图尺寸 -->
   <arg name="map_size_x" value="100.0"/>
   <arg name="map_size_y" value="100.0"/>
-  <arg name="map_size_z" value="5.0"/>
+  <arg name="map_size_z" value="8.0"/>
 
-  <!-- 里程计：RMUA 真值 -->
-  <arg name="odom_topic" value="/airsim_node/drone_1/debug/pose_gt" />
+  <!-- RMUA 适配后输出 -->
+  <arg name="odom_topic" value="/rmua/odom" />
+  <arg name="cloud_topic" value="/rmua/lidar" />
 
   <!-- 主参数 -->
   <include file="$(find ego_planner)/launch/advanced_param.xml">
@@ -23,10 +24,10 @@
     <arg name="fy" value="0" />
 
     <!-- 雷达话题 -->
-    <arg name="cloud_topic" value="/airsim_node/drone_1/lidar" />
+    <arg name="cloud_topic" value="$(arg cloud_topic)" />
 
-    <arg name="max_vel" value="2.0" />
-    <arg name="max_acc" value="3.0" />
+    <arg name="max_vel" value="4.0" />
+    <arg name="max_acc" value="6.0" />
     <arg name="planning_horizon" value="7.5" />
     <arg name="flight_type" value="1" />
 
@@ -48,11 +49,43 @@
     <arg name="point4_z" value="1.0" />
   </include>
 
+  <node pkg="ego_planner" name="rmua_bridge" type="rmua_bridge_node" output="screen">
+    <param name="auto_takeoff" value="true"/>
+    <param name="goal_republish_hz" value="1.0"/>
+    <param name="forward_sim_goal" value="false"/>
+    <param name="lidar_min_range" value="1.2"/>
+    <param name="publish_lidar" value="false"/>
+  </node>
+
+  <param name="/ego_planner_node/grid_map/local_update_range_z" value="6.0"/>
+  <param name="/ego_planner_node/grid_map/max_ray_length" value="6.0"/>
+  <param name="/ego_planner_node/grid_map/virtual_ceil_height" value="7.0"/>
+  <param name="/ego_planner_node/grid_map/visualization_truncate_height" value="6.9"/>
+  <param name="/ego_planner_node/grid_map/treat_out_of_map_as_free" value="true"/>
+
   <!-- 轨迹服务器 -->
   <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen">
     <remap from="/position_cmd" to="/planning/pos_cmd"/>
     <remap from="/odom_world" to="$(arg odom_topic)"/>
     <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_poscmd_bridge" type="rmua_poscmd_bridge_node" output="screen">
+    <remap from="~position_cmd_in" to="/planning/pos_cmd"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_vel_topic_bridge" type="rmua_vel_topic_bridge_node" output="screen">
+    <remap from="~vel_cmd_in" to="/airsim_node/drone_1/vel_body_cmd"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_route_goal_publisher" type="rmua_route_goal_publisher_node" output="screen">
+    <param name="route_file" value="$(env HOME)/MTY/egoplanner_study/src/full_scoring_track_early_uturn.csv"/>
+    <param name="reach_threshold" value="1.2"/>
+    <param name="publish_hz" value="2.0"/>
+    <param name="start_order" value="1"/>
+    <param name="reach_use_2d" value="true"/>
+    <param name="align_initial_altitude" value="false"/>
+    <param name="publish_lookahead_distance" value="6.0"/>
   </node>
 
   <!-- 航点生成器 -->
