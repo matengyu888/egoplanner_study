@@ -57,7 +57,10 @@ public:
     nh_.param("frame_blend_points_before", frame_blend_points_before_, 40);
     nh_.param("frame_blend_points_after", frame_blend_points_after_, 8);
     nh_.param("frame_max_xy_offset", frame_max_xy_offset_, 0.6);
-    nh_.param("frame_max_z_offset", frame_max_z_offset_, 0.25);
+    nh_.param("frame_max_z_offset_up", frame_max_z_offset_up_, 1.8);
+    nh_.param("frame_max_z_offset_down", frame_max_z_offset_down_, 0.0);
+    nh_.param("frame_z_blend_points_before", frame_z_blend_points_before_, 90);
+    nh_.param("frame_z_blend_points_after", frame_z_blend_points_after_, 16);
 
     if (!loadRoute())
     {
@@ -322,17 +325,21 @@ private:
     const FrameAnchor* anchor = getActiveFrameAnchor(publish_index);
     if (anchor != nullptr)
     {
-      const double weight = computeFrameBlendWeight(publish_index, *anchor);
+      const double xy_weight = computeBlendWeight(
+          publish_index, *anchor, frame_blend_points_before_, frame_blend_points_after_);
+      const double z_weight = computeBlendWeight(
+          publish_index, *anchor, frame_z_blend_points_before_, frame_z_blend_points_after_);
       const double track_z = track_goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
       const double anchor_z = anchor->z_up + (have_z_offset_ ? z_offset_ : 0.0);
       const double dx = anchor->x - track_goal.x;
       const double dy = anchor->y - track_goal.y;
       const double xy_norm = std::sqrt(dx * dx + dy * dy);
       const double xy_scale = xy_norm > frame_max_xy_offset_ && xy_norm > 1e-6 ? frame_max_xy_offset_ / xy_norm : 1.0;
-      const double dz = std::max(-frame_max_z_offset_, std::min(anchor_z - track_z, frame_max_z_offset_));
-      msg.pose.position.x = track_goal.x + dx * xy_scale * weight;
-      msg.pose.position.y = track_goal.y + dy * xy_scale * weight;
-      msg.pose.position.z = track_z + dz * weight;
+      const double dz_raw = anchor_z - track_z;
+      const double dz = std::max(-frame_max_z_offset_down_, std::min(dz_raw, frame_max_z_offset_up_));
+      msg.pose.position.x = track_goal.x + dx * xy_scale * xy_weight;
+      msg.pose.position.y = track_goal.y + dy * xy_scale * xy_weight;
+      msg.pose.position.z = track_z + dz * z_weight;
       if (active_anchor_order_ != anchor->order)
       {
         active_anchor_order_ = anchor->order;
@@ -364,7 +371,7 @@ private:
     return nullptr;
   }
 
-  double computeFrameBlendWeight(int publish_index, const FrameAnchor& anchor) const
+  double computeBlendWeight(int publish_index, const FrameAnchor& anchor, int before_points, int after_points) const
   {
     const int anchor_index = std::max(0, anchor.track_index - 1);
     const int delta = anchor_index - publish_index;
@@ -372,16 +379,16 @@ private:
 
     if (delta >= 0)
     {
-      if (delta >= frame_blend_points_before_)
+      if (delta >= before_points)
         return 0.0;
-      raw_weight = 1.0 - static_cast<double>(delta) / std::max(1, frame_blend_points_before_);
+      raw_weight = 1.0 - static_cast<double>(delta) / std::max(1, before_points);
     }
     else
     {
       const int passed_points = -delta;
-      if (passed_points >= frame_blend_points_after_)
+      if (passed_points >= after_points)
         return 0.0;
-      raw_weight = 1.0 - static_cast<double>(passed_points) / std::max(1, frame_blend_points_after_);
+      raw_weight = 1.0 - static_cast<double>(passed_points) / std::max(1, after_points);
     }
 
     raw_weight = std::max(0.0, std::min(raw_weight, 1.0));
@@ -438,7 +445,10 @@ private:
   int frame_blend_points_before_{40};
   int frame_blend_points_after_{8};
   double frame_max_xy_offset_{0.6};
-  double frame_max_z_offset_{0.25};
+  double frame_max_z_offset_up_{1.8};
+  double frame_max_z_offset_down_{0.0};
+  int frame_z_blend_points_before_{90};
+  int frame_z_blend_points_after_{16};
   int active_anchor_order_{-1};
   geometry_msgs::Point current_pos_;
   std::vector<RouteGoal> goals_;

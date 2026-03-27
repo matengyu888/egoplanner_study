@@ -92,7 +92,10 @@
     <param name="frame_blend_points_before" value="40"/>
     <param name="frame_blend_points_after" value="8"/>
     <param name="frame_max_xy_offset" value="0.6"/>
-    <param name="frame_max_z_offset" value="0.25"/>
+    <param name="frame_max_z_offset_up" value="1.8"/>
+    <param name="frame_max_z_offset_down" value="0.0"/>
+    <param name="frame_z_blend_points_before" value="90"/>
+    <param name="frame_z_blend_points_after" value="16"/>
   </node>
 
   <!-- 航点生成器 -->
