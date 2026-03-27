@@ -17,12 +17,25 @@ namespace
 struct RouteGoal
 {
   int order{0};
+  int track_index{0};
   std::string kind;
   std::string name;
   double x{0.0};
   double y{0.0};
   double z_up{0.0};
   double yaw_rad{0.0};
+};
+
+struct FrameAnchor
+{
+  int order{0};
+  int track_index{0};
+  std::string name;
+  double x{0.0};
+  double y{0.0};
+  double z_up{0.0};
+  double yaw_rad{0.0};
+  double nearest_track_dist{0.0};
 };
 
 class RmuaRouteGoalPublisher
@@ -38,6 +51,13 @@ public:
     nh_.param("align_initial_altitude", align_initial_altitude_, true);
     nh_.param("start_from_nearest", start_from_nearest_, true);
     nh_.param("publish_lookahead_distance", publish_lookahead_distance_, 0.0);
+    nh_.param<std::string>("scoring_frames_file", scoring_frames_file_, "");
+    nh_.param("frame_max_track_dist", frame_max_track_dist_, 2.0);
+    nh_.param("frame_target_window_points", frame_target_window_points_, 30);
+    nh_.param("frame_blend_points_before", frame_blend_points_before_, 40);
+    nh_.param("frame_blend_points_after", frame_blend_points_after_, 8);
+    nh_.param("frame_max_xy_offset", frame_max_xy_offset_, 0.6);
+    nh_.param("frame_max_z_offset", frame_max_z_offset_, 0.25);
 
     if (!loadRoute())
     {
@@ -45,6 +65,7 @@ public:
       ros::shutdown();
       return;
     }
+    loadFrameAnchors();
 
     int start_index = 0;
     while (start_index < static_cast<int>(goals_.size()) && goals_[start_index].order < start_order_)
@@ -126,6 +147,7 @@ private:
 
       RouteGoal goal;
       goal.order = order++;
+      goal.track_index = goal.order;
       goal.kind = "track";
       goal.name = "track_" + std::to_string(goal.order);
       goal.x = std::stod(cols[1]);
@@ -142,6 +164,54 @@ private:
     }
 
     return !goals_.empty();
+  }
+
+  void loadFrameAnchors()
+  {
+    if (scoring_frames_file_.empty())
+      return;
+
+    std::ifstream fin(scoring_frames_file_);
+    if (!fin.is_open())
+    {
+      ROS_WARN("Failed to open RMUA scoring frame file: %s", scoring_frames_file_.c_str());
+      return;
+    }
+
+    static const std::regex line_re(
+        R"(^\s*(\d+)\s+track_idx=\s*(\d+)\s+dist=\s*([-0-9.]+)\s+(\w+)\s+(\S+)\s+x=\s*([-0-9.]+)\s+y=\s*([-0-9.]+)\s+z=\s*([-0-9.]+)\s+yaw_deg=\s*([-0-9.]+))");
+
+    std::string line;
+    while (std::getline(fin, line))
+    {
+      std::smatch match;
+      if (!std::regex_search(line, match, line_re))
+        continue;
+
+      if (match[4].str() != "frame")
+        continue;
+
+      const double nearest_dist = std::stod(match[3].str());
+      if (nearest_dist > frame_max_track_dist_)
+        continue;
+
+      FrameAnchor anchor;
+      anchor.order = std::stoi(match[1].str());
+      anchor.track_index = std::stoi(match[2].str());
+      anchor.name = match[5].str();
+      anchor.x = std::stod(match[6].str());
+      anchor.y = std::stod(match[7].str());
+      anchor.z_up = -std::stod(match[8].str());
+      anchor.yaw_rad = std::stod(match[9].str()) * M_PI / 180.0;
+      anchor.nearest_track_dist = nearest_dist;
+      frame_anchors_.push_back(anchor);
+    }
+
+    if (!frame_anchors_.empty())
+    {
+      ROS_INFO("Loaded %zu RMUA frame anchors from %s (max track dist %.2f m).",
+               frame_anchors_.size(), scoring_frames_file_.c_str(), frame_max_track_dist_);
+    }
   }
 
   void odomCallback(const nav_msgs::OdometryConstPtr& msg)
@@ -240,15 +310,83 @@ private:
       return;
 
     const int publish_index = getPublishIndex();
-    const auto& goal = goals_[publish_index];
+    const auto& track_goal = goals_[publish_index];
     geometry_msgs::PoseStamped msg;
     msg.header.stamp = ros::Time::now();
     msg.header.frame_id = "world";
-    msg.pose.position.x = goal.x;
-    msg.pose.position.y = goal.y;
-    msg.pose.position.z = goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
-    msg.pose.orientation = tf::createQuaternionMsgFromYaw(goal.yaw_rad);
+    msg.pose.position.x = track_goal.x;
+    msg.pose.position.y = track_goal.y;
+    msg.pose.position.z = track_goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+    msg.pose.orientation = tf::createQuaternionMsgFromYaw(track_goal.yaw_rad);
+
+    const FrameAnchor* anchor = getActiveFrameAnchor(publish_index);
+    if (anchor != nullptr)
+    {
+      const double weight = computeFrameBlendWeight(publish_index, *anchor);
+      const double track_z = track_goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+      const double anchor_z = anchor->z_up + (have_z_offset_ ? z_offset_ : 0.0);
+      const double dx = anchor->x - track_goal.x;
+      const double dy = anchor->y - track_goal.y;
+      const double xy_norm = std::sqrt(dx * dx + dy * dy);
+      const double xy_scale = xy_norm > frame_max_xy_offset_ && xy_norm > 1e-6 ? frame_max_xy_offset_ / xy_norm : 1.0;
+      const double dz = std::max(-frame_max_z_offset_, std::min(anchor_z - track_z, frame_max_z_offset_));
+      msg.pose.position.x = track_goal.x + dx * xy_scale * weight;
+      msg.pose.position.y = track_goal.y + dy * xy_scale * weight;
+      msg.pose.position.z = track_z + dz * weight;
+      if (active_anchor_order_ != anchor->order)
+      {
+        active_anchor_order_ = anchor->order;
+        ROS_INFO("Blending toward RMUA frame %03d %s at track_idx=%d, nearest_track_dist=%.2f",
+                 anchor->order, anchor->name.c_str(), anchor->track_index, anchor->nearest_track_dist);
+      }
+    }
+    else
+    {
+      active_anchor_order_ = -1;
+    }
     goal_pub_.publish(msg);
+  }
+
+  const FrameAnchor* getActiveFrameAnchor(int publish_index) const
+  {
+    if (frame_anchors_.empty())
+      return nullptr;
+
+    const int window_end = std::min(static_cast<int>(goals_.size()) - 1, publish_index + frame_target_window_points_);
+    for (const auto& anchor : frame_anchors_)
+    {
+      const int anchor_index = std::max(0, anchor.track_index - 1);
+      if (anchor_index < current_index_)
+        continue;
+      if (anchor_index <= window_end)
+        return &anchor;
+    }
+    return nullptr;
+  }
+
+  double computeFrameBlendWeight(int publish_index, const FrameAnchor& anchor) const
+  {
+    const int anchor_index = std::max(0, anchor.track_index - 1);
+    const int delta = anchor_index - publish_index;
+    double raw_weight = 0.0;
+
+    if (delta >= 0)
+    {
+      if (delta >= frame_blend_points_before_)
+        return 0.0;
+      raw_weight = 1.0 - static_cast<double>(delta) / std::max(1, frame_blend_points_before_);
+    }
+    else
+    {
+      const int passed_points = -delta;
+      if (passed_points >= frame_blend_points_after_)
+        return 0.0;
+      raw_weight = 1.0 - static_cast<double>(passed_points) / std::max(1, frame_blend_points_after_);
+    }
+
+    raw_weight = std::max(0.0, std::min(raw_weight, 1.0));
+    // Smoothstep avoids sharp target changes when entering/leaving a frame window.
+    return raw_weight * raw_weight * (3.0 - 2.0 * raw_weight);
   }
 
   int getPublishIndex() const
@@ -294,8 +432,17 @@ private:
   bool have_z_offset_{false};
   double z_offset_{0.0};
   double publish_lookahead_distance_{0.0};
+  std::string scoring_frames_file_;
+  double frame_max_track_dist_{2.0};
+  int frame_target_window_points_{30};
+  int frame_blend_points_before_{40};
+  int frame_blend_points_after_{8};
+  double frame_max_xy_offset_{0.6};
+  double frame_max_z_offset_{0.25};
+  int active_anchor_order_{-1};
   geometry_msgs::Point current_pos_;
   std::vector<RouteGoal> goals_;
+  std::vector<FrameAnchor> frame_anchors_;
 };
 
 }  // namespace

@@ -80,12 +80,19 @@
 
   <node pkg="ego_planner" name="rmua_route_goal_publisher" type="rmua_route_goal_publisher_node" output="screen">
     <param name="route_file" value="$(env HOME)/MTY/egoplanner_study/src/full_scoring_track_early_uturn.csv"/>
+    <param name="scoring_frames_file" value="$(env HOME)/MTY/egoplanner_study/src/all_scoring_frames_ordered.txt"/>
     <param name="reach_threshold" value="1.2"/>
     <param name="publish_hz" value="2.0"/>
     <param name="start_order" value="1"/>
     <param name="reach_use_2d" value="true"/>
     <param name="align_initial_altitude" value="false"/>
     <param name="publish_lookahead_distance" value="6.0"/>
+    <param name="frame_max_track_dist" value="2.0"/>
+    <param name="frame_target_window_points" value="30"/>
+    <param name="frame_blend_points_before" value="40"/>
+    <param name="frame_blend_points_after" value="8"/>
+    <param name="frame_max_xy_offset" value="0.6"/>
+    <param name="frame_max_z_offset" value="0.25"/>
   </node>
 
   <!-- 航点生成器 -->
