@@ -80,7 +80,7 @@
 
   <node pkg="ego_planner" name="rmua_route_goal_publisher" type="rmua_route_goal_publisher_node" output="screen">
     <param name="route_file" value="$(env HOME)/MTY/egoplanner_study/src/full_scoring_track_early_uturn.csv"/>
-    <param name="scoring_frames_file" value="$(env HOME)/MTY/egoplanner_study/src/all_scoring_frames_ordered.txt"/>
+    <param name="scoring_frames_file" value=""/>
     <param name="reach_threshold" value="1.2"/>
     <param name="publish_hz" value="2.0"/>
     <param name="start_order" value="1"/>
