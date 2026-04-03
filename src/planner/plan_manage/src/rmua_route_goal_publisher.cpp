@@ -1,5 +1,6 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <ros/ros.h>
 #include <tf/transform_datatypes.h>
 
@@ -50,7 +51,16 @@ public:
     nh_.param("reach_use_2d", reach_use_2d_, true);
     nh_.param("align_initial_altitude", align_initial_altitude_, true);
     nh_.param("start_from_nearest", start_from_nearest_, true);
+    nh_.param("progress_window_points", progress_window_points_, 40);
+    nh_.param("progress_snap_dist", progress_snap_dist_, 8.0);
     nh_.param("publish_lookahead_distance", publish_lookahead_distance_, 0.0);
+    nh_.param("publish_direct_waypoint", publish_direct_waypoint_, true);
+    nh_.param("direct_waypoint_window_points", direct_waypoint_window_points_, 1);
+    nh_.param("min_publish_goal_distance", min_publish_goal_distance_, 3.0);
+    nh_.param("passed_goal_projection_threshold", passed_goal_projection_threshold_, 0.2);
+    nh_.param("passed_goal_lateral_threshold", passed_goal_lateral_threshold_, 2.5);
+    nh_.param("same_goal_republish_period", same_goal_republish_period_, 0.5);
+    nh_.param("same_goal_republish_dist", same_goal_republish_dist_, 2.0);
     nh_.param<std::string>("scoring_frames_file", scoring_frames_file_, "");
     nh_.param("frame_max_track_dist", frame_max_track_dist_, 2.0);
     nh_.param("frame_target_window_points", frame_target_window_points_, 30);
@@ -77,9 +87,11 @@ public:
 
     odom_sub_ = nh_.subscribe("/rmua/odom", 20, &RmuaRouteGoalPublisher::odomCallback, this);
     goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 10, true);
+    direct_waypoint_pub_ = nh_.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 10, true);
     timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.1, publish_hz_)), &RmuaRouteGoalPublisher::timerCallback, this);
 
-    ROS_INFO("Loaded %zu RMUA route goals, starting from order %d.", goals_.size(), goals_[current_index_].order);
+    ROS_INFO("Loaded %zu RMUA route goals from %s, starting from order %d (index %d).",
+             goals_.size(), route_file_.c_str(), goals_[current_index_].order, current_index_);
   }
 
 private:
@@ -247,6 +259,7 @@ private:
       ROS_INFO("Aligned RMUA route altitude offset to %.2f m.", z_offset_);
     }
 
+    snapForwardByNearest();
     advanceIfReached();
   }
 
@@ -287,8 +300,37 @@ private:
       const double goal_z = goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
       const double dz = current_pos_.z - goal_z;
       const double dist = reach_use_2d_ ? std::sqrt(dx * dx + dy * dy) : std::sqrt(dx * dx + dy * dy + dz * dz);
+      bool passed_goal = false;
 
-      if (dist > reach_threshold_)
+      if (current_index_ + 1 < static_cast<int>(goals_.size()))
+      {
+        const auto& next_goal = goals_[current_index_ + 1];
+        const double next_goal_z = next_goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+        const double seg_dx = next_goal.x - goal.x;
+        const double seg_dy = next_goal.y - goal.y;
+        const double seg_dz = reach_use_2d_ ? 0.0 : (next_goal_z - goal_z);
+        const double seg_norm = std::sqrt(seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz);
+        if (seg_norm > 1e-6)
+        {
+          const double along = (dx * seg_dx + dy * seg_dy + (reach_use_2d_ ? 0.0 : dz * seg_dz)) / seg_norm;
+          const double along_dx = along * seg_dx / seg_norm;
+          const double along_dy = along * seg_dy / seg_norm;
+          const double along_dz = reach_use_2d_ ? 0.0 : along * seg_dz / seg_norm;
+          const double lateral_dx = dx - along_dx;
+          const double lateral_dy = dy - along_dy;
+          const double lateral_dz = reach_use_2d_ ? 0.0 : (dz - along_dz);
+          const double lateral = std::sqrt(lateral_dx * lateral_dx + lateral_dy * lateral_dy + lateral_dz * lateral_dz);
+          passed_goal = along >= passed_goal_projection_threshold_ && lateral <= passed_goal_lateral_threshold_;
+          if (passed_goal && dist > reach_threshold_)
+          {
+            ROS_INFO_THROTTLE(0.5,
+                              "Advance RMUA route by passed-goal rule: idx=%d order=%03d dist=%.2f along=%.2f lateral=%.2f",
+                              current_index_, goal.order, dist, along, lateral);
+          }
+        }
+      }
+
+      if (dist > reach_threshold_ && !passed_goal)
       {
         if (current_index_ != last_reported_index_)
         {
@@ -307,12 +349,79 @@ private:
       ROS_INFO_THROTTLE(2.0, "All RMUA route goals have been published and reached.");
   }
 
+  void snapForwardByNearest()
+  {
+    if (!have_odom_ || current_index_ >= static_cast<int>(goals_.size()))
+      return;
+
+    int effective_window_points = progress_window_points_;
+    if (effective_window_points <= 0 && publish_direct_waypoint_ && direct_waypoint_window_points_ > 1)
+      effective_window_points = direct_waypoint_window_points_;
+    if (effective_window_points <= 0)
+      return;
+
+    double effective_snap_dist = progress_snap_dist_;
+    if (effective_snap_dist <= 1e-3 && publish_direct_waypoint_ && direct_waypoint_window_points_ > 1)
+      effective_snap_dist = std::max(6.0, reach_threshold_ * 3.0);
+    if (effective_snap_dist <= 1e-3)
+      return;
+
+    const int window_end = std::min(static_cast<int>(goals_.size()) - 1, current_index_ + effective_window_points);
+    int nearest_index = current_index_;
+    double nearest_dist = std::numeric_limits<double>::infinity();
+
+    for (int i = current_index_; i <= window_end; ++i)
+    {
+      const auto& goal = goals_[i];
+      const double goal_z = goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+      const double dx = current_pos_.x - goal.x;
+      const double dy = current_pos_.y - goal.y;
+      const double dz = current_pos_.z - goal_z;
+      const double dist = reach_use_2d_ ? std::sqrt(dx * dx + dy * dy) : std::sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist < nearest_dist)
+      {
+        nearest_dist = dist;
+        nearest_index = i;
+      }
+    }
+
+    if (nearest_index > current_index_ && nearest_dist <= effective_snap_dist)
+    {
+      ROS_INFO("RMUA route progress snapped from index %d to %d (order %03d), nearest_dist=%.2f window=%d snap=%.2f",
+               current_index_, nearest_index, goals_[nearest_index].order, nearest_dist,
+               effective_window_points, effective_snap_dist);
+      current_index_ = nearest_index;
+      last_reported_index_ = -1;
+    }
+  }
+
   void timerCallback(const ros::TimerEvent&)
   {
     if (!have_odom_ || current_index_ >= static_cast<int>(goals_.size()))
       return;
 
     const int publish_index = getPublishIndex();
+    const int window_points = std::max(1, direct_waypoint_window_points_);
+    const int window_end = std::min(static_cast<int>(goals_.size()) - 1, publish_index + window_points - 1);
+    if (publish_direct_waypoint_)
+    {
+      const bool same_window = publish_index == last_published_index_ &&
+                               current_index_ == last_published_current_index_ &&
+                               window_end == last_published_window_end_;
+      if (same_window)
+      {
+        if (same_goal_republish_period_ <= 1e-3)
+          return;
+        const double elapsed = (ros::Time::now() - last_published_time_).toSec();
+        if (elapsed < same_goal_republish_period_)
+          return;
+      }
+    }
+    else if (publish_index == last_published_index_ && !shouldRepublishCurrentGoal())
+    {
+      return;
+    }
+
     const auto& track_goal = goals_[publish_index];
     geometry_msgs::PoseStamped msg;
     msg.header.stamp = ros::Time::now();
@@ -351,7 +460,65 @@ private:
     {
       active_anchor_order_ = -1;
     }
-    goal_pub_.publish(msg);
+    if (publish_direct_waypoint_)
+    {
+      nav_msgs::Path path_msg;
+      path_msg.header = msg.header;
+      path_msg.poses.push_back(msg);
+      for (int offset = 1; offset < window_points && publish_index + offset < static_cast<int>(goals_.size()); ++offset)
+      {
+        const auto& future_goal = goals_[publish_index + offset];
+        geometry_msgs::PoseStamped future_msg;
+        future_msg.header = msg.header;
+        future_msg.pose.position.x = future_goal.x;
+        future_msg.pose.position.y = future_goal.y;
+        future_msg.pose.position.z = future_goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+        future_msg.pose.orientation = tf::createQuaternionMsgFromYaw(future_goal.yaw_rad);
+        path_msg.poses.push_back(future_msg);
+      }
+      direct_waypoint_pub_.publish(path_msg);
+    }
+    else
+    {
+      goal_pub_.publish(msg);
+    }
+    last_published_index_ = publish_index;
+    last_published_current_index_ = current_index_;
+    last_published_window_end_ = window_end;
+    last_published_time_ = ros::Time::now();
+    if (publish_direct_waypoint_)
+    {
+      ROS_INFO_THROTTLE(0.5, "Published RMUA direct waypoint current_index=%d publish_index=%d order=%03d pos=(%.2f, %.2f, %.2f)",
+                        current_index_, publish_index, track_goal.order,
+                        msg.pose.position.x, msg.pose.position.y, msg.pose.position.z);
+    }
+    else
+    {
+      ROS_INFO("Published RMUA goal current_index=%d publish_index=%d order=%03d pos=(%.2f, %.2f, %.2f)",
+               current_index_, publish_index, track_goal.order,
+               msg.pose.position.x, msg.pose.position.y, msg.pose.position.z);
+    }
+  }
+
+  bool shouldRepublishCurrentGoal() const
+  {
+    if (last_published_index_ < 0 || last_published_index_ >= static_cast<int>(goals_.size()))
+      return true;
+
+    if (same_goal_republish_period_ <= 1e-3)
+      return false;
+
+    const double elapsed = (ros::Time::now() - last_published_time_).toSec();
+    if (elapsed < same_goal_republish_period_)
+      return false;
+
+    const auto& goal = goals_[last_published_index_];
+    const double goal_z = goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+    const double dx = current_pos_.x - goal.x;
+    const double dy = current_pos_.y - goal.y;
+    const double dz = current_pos_.z - goal_z;
+    const double dist = reach_use_2d_ ? std::sqrt(dx * dx + dy * dy) : std::sqrt(dx * dx + dy * dy + dz * dz);
+    return dist <= same_goal_republish_dist_;
   }
 
   const FrameAnchor* getActiveFrameAnchor(int publish_index) const
@@ -399,7 +566,7 @@ private:
   int getPublishIndex() const
   {
     if (publish_lookahead_distance_ <= 1e-3 || current_index_ >= static_cast<int>(goals_.size()) - 1)
-      return current_index_;
+      return ensureMinimumPublishDistance(current_index_);
 
     double accumulated_dist = 0.0;
     int publish_index = current_index_;
@@ -417,12 +584,34 @@ private:
       if (accumulated_dist >= publish_lookahead_distance_)
         break;
     }
-    return publish_index;
+    return ensureMinimumPublishDistance(publish_index);
+  }
+
+  int ensureMinimumPublishDistance(int publish_index) const
+  {
+    if (min_publish_goal_distance_ <= 1e-3)
+      return publish_index;
+
+    int adjusted_index = publish_index;
+    while (adjusted_index + 1 < static_cast<int>(goals_.size()))
+    {
+      const auto& goal = goals_[adjusted_index];
+      const double goal_z = goal.z_up + (have_z_offset_ ? z_offset_ : 0.0);
+      const double dx = current_pos_.x - goal.x;
+      const double dy = current_pos_.y - goal.y;
+      const double dz = current_pos_.z - goal_z;
+      const double dist = reach_use_2d_ ? std::sqrt(dx * dx + dy * dy) : std::sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist >= min_publish_goal_distance_)
+        break;
+      ++adjusted_index;
+    }
+    return adjusted_index;
   }
 
   ros::NodeHandle nh_;
   ros::Subscriber odom_sub_;
   ros::Publisher goal_pub_;
+  ros::Publisher direct_waypoint_pub_;
   ros::Timer timer_;
 
   std::string route_file_;
@@ -435,10 +624,19 @@ private:
   bool reach_use_2d_{true};
   bool align_initial_altitude_{true};
   bool start_from_nearest_{true};
+  int progress_window_points_{40};
+  double progress_snap_dist_{8.0};
+  bool publish_direct_waypoint_{true};
+  int direct_waypoint_window_points_{1};
   bool route_index_initialized_{false};
   bool have_z_offset_{false};
   double z_offset_{0.0};
   double publish_lookahead_distance_{0.0};
+  double min_publish_goal_distance_{3.0};
+  double passed_goal_projection_threshold_{0.2};
+  double passed_goal_lateral_threshold_{2.5};
+  double same_goal_republish_period_{0.5};
+  double same_goal_republish_dist_{2.0};
   std::string scoring_frames_file_;
   double frame_max_track_dist_{2.0};
   int frame_target_window_points_{30};
@@ -450,6 +648,10 @@ private:
   int frame_z_blend_points_before_{90};
   int frame_z_blend_points_after_{16};
   int active_anchor_order_{-1};
+  int last_published_index_{-1};
+  int last_published_current_index_{-1};
+  int last_published_window_end_{-1};
+  ros::Time last_published_time_;
   geometry_msgs::Point current_pos_;
   std::vector<RouteGoal> goals_;
   std::vector<FrameAnchor> frame_anchors_;

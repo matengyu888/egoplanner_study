@@ -14,6 +14,8 @@ namespace ego_planner
     have_odom_ = false;//是否收到里程计信息，初始无
     have_new_target_ = false;
     flag_escape_emergency_ = false;
+    end_pt_.setZero();
+    end_vel_.setZero();
 
     /*  fsm param  */
 
@@ -24,6 +26,11 @@ namespace ego_planner
     nh.param("fsm/planning_horizon", planning_horizen_, -1.0);
     nh.param("fsm/planning_horizen_time", planning_horizen_time_, -1.0);
     nh.param("fsm/emergency_time_", emergency_time_, 1.0);
+    nh.param("fsm/keep_goal_velocity", keep_goal_velocity_, false);
+    nh.param("fsm/goal_velocity_scale", goal_velocity_scale_, 1.0);
+    nh.param("fsm/goal_velocity_min", goal_velocity_min_, 0.0);
+    nh.param("fsm/goal_velocity_max", goal_velocity_max_, -1.0);
+    nh.param("fsm/goal_velocity_reverse_cos_threshold", goal_velocity_reverse_cos_threshold_, 0.0);
 
     nh.param("fsm/waypoint_num", waypoint_num_, -1);
     for (int i = 0; i < waypoint_num_; i++)
@@ -70,6 +77,46 @@ namespace ego_planner
     }
     else
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
+
+    ROS_INFO("EGO FSM keep_goal_velocity=%s scale=%.2f min=%.2f max=%.2f reverse_cos_threshold=%.2f",
+             keep_goal_velocity_ ? "true" : "false",
+             goal_velocity_scale_,
+             goal_velocity_min_,
+             goal_velocity_max_,
+             goal_velocity_reverse_cos_threshold_);
+  }
+
+  Eigen::Vector3d EGOReplanFSM::computeGoalVelocity(const Eigen::Vector3d &goal_pt) const
+  {
+    if (!keep_goal_velocity_)
+      return Eigen::Vector3d::Zero();
+
+    const double speed_cap = goal_velocity_max_ > 1e-3 ? goal_velocity_max_ : planner_manager_->pp_.max_vel_;
+    double desired_speed = odom_vel_.norm() * goal_velocity_scale_;
+    desired_speed = std::max(goal_velocity_min_, std::min(desired_speed, speed_cap));
+
+    if (desired_speed <= 1e-3)
+      return Eigen::Vector3d::Zero();
+
+    Eigen::Vector3d direction = goal_pt - odom_pos_;
+    if (direction.norm() <= 1e-3)
+      direction = odom_vel_;
+    if (direction.norm() <= 1e-3)
+      return Eigen::Vector3d::Zero();
+
+    if (odom_vel_.norm() > 1e-2)
+    {
+      const double cos_align = direction.normalized().dot(odom_vel_.normalized());
+      if (cos_align < goal_velocity_reverse_cos_threshold_)
+      {
+        ROS_WARN_THROTTLE(0.5,
+                          "Suppress reverse goal velocity: cos_align=%.3f threshold=%.3f",
+                          cos_align, goal_velocity_reverse_cos_threshold_);
+        return Eigen::Vector3d::Zero();
+      }
+    }
+
+    return direction.normalized() * desired_speed;
   }
 
   void EGOReplanFSM::planGlobalTrajbyGivenWps()
@@ -136,6 +183,9 @@ namespace ego_planner
   //并根据当前状态机状态切换执行逻辑，同时完成轨迹可视化。
   void EGOReplanFSM::waypointCallback(const nav_msgs::PathConstPtr &msg)
   {
+    if (msg->poses.empty())
+      return;
+
     //1. 航点有效性校验
     if (msg->poses[0].pose.position.z < -0.1)
       return;
@@ -146,10 +196,26 @@ namespace ego_planner
     init_pt_ = odom_pos_;// 记录轨迹起点为无人机当前位置（来自里程计）
 
     //3. 提取目标点并调用规划器生成轨迹
-    //与之前 planGlobalTrajWaypoints 的区别：这里是「单点目标」（起点→终点），而非「多航点序列」，调用的是 planGlobalTraj 接口，更轻量化
+    // 现在优先使用路径窗口作为全局参考；只有单点时才退回单点全局目标。
     bool success = false;
-    end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y, msg->poses[0].pose.position.z;
-    success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), end_pt_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    std::vector<Eigen::Vector3d> wps;
+    wps.reserve(msg->poses.size());
+    for (const auto& pose_stamped : msg->poses)
+    {
+      const auto& p = pose_stamped.pose.position;
+      if (p.z < -0.1)
+        continue;
+      wps.emplace_back(p.x, p.y, p.z);
+    }
+    if (wps.empty())
+      return;
+
+    end_pt_ = wps.back();
+    end_vel_ = computeGoalVelocity(end_pt_);
+    if (wps.size() == 1)
+      success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), end_pt_, end_vel_, Eigen::Vector3d::Zero());
+    else
+      success = planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), wps, end_vel_, Eigen::Vector3d::Zero());
 
     //4. 可视化目标点
     visualization_->displayGoalPoint(end_pt_, Eigen::Vector4d(0, 0.5, 0.5, 1), 0.3, 0);
@@ -168,7 +234,6 @@ namespace ego_planner
         gloabl_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
       }
 
-      end_vel_.setZero();
       have_target_ = true;
       have_new_target_ = true;
 
@@ -288,6 +353,15 @@ namespace ego_planner
       start_vel_ = odom_vel_;
       start_acc_.setZero();
 
+      if ((end_pt_ - start_pt_).norm() < 0.3)
+      {
+        ROS_WARN_THROTTLE(0.5, "GEN_NEW_TRAJ skipped: current target already reached, waiting for next goal.");
+        have_target_ = false;
+        have_new_target_ = false;
+        changeFSMExecState(WAIT_TARGET, "FSM");
+        break;
+      }
+
       // Eigen::Vector3d rot_x = odom_orient_.toRotationMatrix().block(0, 0, 3, 1);
       // start_yaw_(0)         = atan2(rot_x(1), rot_x(0));
       // start_yaw_(1) = start_yaw_(2) = 0.0;
@@ -316,6 +390,14 @@ namespace ego_planner
 
     case REPLAN_TRAJ:
     {
+      if ((end_pt_ - odom_pos_).norm() < 0.3)
+      {
+        ROS_WARN_THROTTLE(0.5, "REPLAN_TRAJ skipped: current target already reached, waiting for next goal.");
+        have_target_ = false;
+        have_new_target_ = false;
+        changeFSMExecState(WAIT_TARGET, "FSM");
+        break;
+      }
 
       //基于当前正在执行的轨迹，生成新的局部重规划轨迹
       if (planFromCurrentTraj())
@@ -560,52 +642,87 @@ namespace ego_planner
   若遍历至全局轨迹末尾则取最终终点，同时根据局部目标点到终点的距离是否小于减速距离，分别设置目标速度为 0 或全局轨迹对应速度。*/
   void EGOReplanFSM::getLocalTarget()
   {
-    double t;
-
-    double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
-    double dist_min = 9999, dist_min_t = 0.0;
-    for (t = planner_manager_->global_data_.last_progress_time_; t < planner_manager_->global_data_.global_duration_; t += t_step)
+    auto &global_data = planner_manager_->global_data_;
+    const double global_duration = global_data.global_duration_;
+    if (global_duration <= 1e-3)
     {
-      Eigen::Vector3d pos_t = planner_manager_->global_data_.getPosition(t);
-      double dist = (pos_t - start_pt_).norm();
+      local_target_pt_ = end_pt_;
+      local_target_vel_ = Eigen::Vector3d::Zero();
+      return;
+    }
 
-      if (t < planner_manager_->global_data_.last_progress_time_ + 1e-5 && dist > planning_horizen_)
+    const double max_vel = std::max(1.0, planner_manager_->pp_.max_vel_);
+    const double projection_step = std::max(0.03, planning_horizen_ / (80.0 * max_vel));
+    const double target_step = std::max(0.02, planning_horizen_ / (40.0 * max_vel));
+    const double forward_projection_window = std::max(5.0, planning_horizen_time_ * 2.0);
+
+    double search_begin = std::max(0.0, std::min(global_data.last_progress_time_, global_duration));
+    double search_end = std::min(global_duration, search_begin + forward_projection_window);
+    double best_t = search_begin;
+    double best_dist = std::numeric_limits<double>::infinity();
+
+    // First, re-project the current replan start point onto the current global trajectory.
+    for (double sample_t = search_begin; sample_t <= search_end + 1e-6; sample_t += projection_step)
+    {
+      const double dist = (global_data.getPosition(sample_t) - start_pt_).norm();
+      if (dist < best_dist)
       {
-        // todo
-        ROS_ERROR("last_progress_time_ ERROR !!!!!!!!!");
-        ROS_ERROR("last_progress_time_ ERROR !!!!!!!!!");
-        ROS_ERROR("last_progress_time_ ERROR !!!!!!!!!");
-        ROS_ERROR("last_progress_time_ ERROR !!!!!!!!!");
-        ROS_ERROR("last_progress_time_ ERROR !!!!!!!!!");
-        return;
+        best_dist = dist;
+        best_t = sample_t;
       }
-      if (dist < dist_min)
+    }
+
+    // If progress drifted too far, fall back to a broader forward-only search instead of failing the mission.
+    if (best_dist > planning_horizen_ && search_end < global_duration)
+    {
+      const double coarse_step = std::max(0.05, projection_step * 2.0);
+      for (double sample_t = search_end; sample_t <= global_duration + 1e-6; sample_t += coarse_step)
       {
-        dist_min = dist;
-        dist_min_t = t;
+        const double dist = (global_data.getPosition(sample_t) - start_pt_).norm();
+        if (dist < best_dist)
+        {
+          best_dist = dist;
+          best_t = sample_t;
+        }
       }
+      ROS_WARN_THROTTLE(1.0,
+                        "Recovered stale global progress: best_dist=%.2f last_progress=%.2f best_t=%.2f",
+                        best_dist, global_data.last_progress_time_, best_t);
+    }
+
+    global_data.last_progress_time_ = best_t;
+
+    double target_t = global_duration;
+    bool found_target = false;
+    for (double sample_t = best_t; sample_t <= global_duration + 1e-6; sample_t += target_step)
+    {
+      const Eigen::Vector3d pos_t = global_data.getPosition(sample_t);
+      const double dist = (pos_t - start_pt_).norm();
       if (dist >= planning_horizen_)
       {
         local_target_pt_ = pos_t;
-        planner_manager_->global_data_.last_progress_time_ = dist_min_t;
+        target_t = sample_t;
+        found_target = true;
         break;
       }
     }
-    if (t > planner_manager_->global_data_.global_duration_) // Last global point
+
+    if (!found_target)
     {
       local_target_pt_ = end_pt_;
+      target_t = global_duration;
     }
 
     if ((end_pt_ - local_target_pt_).norm() < (planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_) / (2 * planner_manager_->pp_.max_acc_))
     {
-      // local_target_vel_ = (end_pt_ - init_pt_).normalized() * planner_manager_->pp_.max_vel_ * (( end_pt_ - local_target_pt_ ).norm() / ((planner_manager_->pp_.max_vel_*planner_manager_->pp_.max_vel_)/(2*planner_manager_->pp_.max_acc_)));
-      // cout << "A" << endl;
-      local_target_vel_ = Eigen::Vector3d::Zero();
+      if (keep_goal_velocity_ && end_vel_.norm() > 1e-3)
+        local_target_vel_ = end_vel_;
+      else
+        local_target_vel_ = Eigen::Vector3d::Zero();
     }
     else
     {
-      local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
-      // cout << "AA" << endl;
+      local_target_vel_ = global_data.getVelocity(std::min(target_t, global_duration));
     }
   }
 

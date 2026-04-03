@@ -56,6 +56,11 @@ namespace ego_planner
     int waypoint_num_;
     double planning_horizen_, planning_horizen_time_;
     double emergency_time_;
+    bool keep_goal_velocity_;
+    double goal_velocity_scale_;
+    double goal_velocity_min_;
+    double goal_velocity_max_;
+    double goal_velocity_reverse_cos_threshold_;
 
     /* planning data */
     bool trigger_, have_target_, have_odom_, have_new_target_;
@@ -90,6 +95,7 @@ namespace ego_planner
 
     void planGlobalTrajbyGivenWps();
     void getLocalTarget();
+    Eigen::Vector3d computeGoalVelocity(const Eigen::Vector3d &goal_pt) const;
 
     /* ROS functions */
     void execFSMCallback(const ros::TimerEvent &e);

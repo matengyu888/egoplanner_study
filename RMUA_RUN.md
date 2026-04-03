@@ -12,9 +12,9 @@ cd /home/uestc/XZC/RMUA/IntelligentUAVChampionshipBase/simulator12.0.0.3
 ### 终端 2：启动队员控制器
 
 ```bash
-source /home/uestc/XZC/RMUA/IntelligentUAVChampionshipBase/basic_dev/devel/setup.bash
-rosparam load /home/uestc/XZC/RMUA/IntelligentUAVChampionshipBase/basic_dev/src/controller/config/pos_params.yaml /pos_controller_node
-rosrun controller pos_controller_node
+cd /home/uestc/XZC/RMUA/IntelligentUAVChampionshipBase/basic_dev
+sss
+roslaunch controller pos_control_ego.launch 
 ```
 
 ### 终端 3：启动当前工程规划
@@ -24,7 +24,7 @@ cd /home/uestc/MTY/egoplanner_study
 source devel/setup.bash
 roslaunch ego_planner run_in_rmua.launch
 ```
-
+rosservice call /airsim_node/drone_1/takeoff "{}"
 ## 运行中的关键话题
 
 可以用下面几个话题确认链路是否正常：

@@ -7,6 +7,13 @@
   <!-- RMUA 适配后输出 -->
   <arg name="odom_topic" value="/rmua/odom" />
   <arg name="cloud_topic" value="/rmua/lidar" />
+  <arg name="route_reach_threshold" value="1.2" />
+  <arg name="route_publish_hz" value="5.0" />
+  <arg name="route_goal_lookahead_distance" value="0.0" />
+  <arg name="route_min_publish_goal_distance" value="0.0" />
+  <arg name="route_passed_goal_projection_threshold" value="0.4" />
+  <arg name="route_passed_goal_lateral_threshold" value="2.5" />
+  <arg name="route_direct_waypoint_window_points" value="80" />
 
   <!-- 主参数 -->
   <include file="$(find ego_planner)/launch/advanced_param.xml">
@@ -26,9 +33,9 @@
     <!-- 雷达话题 -->
     <arg name="cloud_topic" value="$(arg cloud_topic)" />
 
-    <arg name="max_vel" value="4.0" />
-    <arg name="max_acc" value="6.0" />
-    <arg name="planning_horizon" value="7.5" />
+    <arg name="max_vel" value="20.0" />
+    <arg name="max_acc" value="12.0" />
+    <arg name="planning_horizon" value="14.0" />
     <arg name="flight_type" value="1" />
 
     <arg name="point_num" value="5" />
@@ -51,7 +58,7 @@
 
   <node pkg="ego_planner" name="rmua_bridge" type="rmua_bridge_node" output="screen">
     <param name="auto_takeoff" value="true"/>
-    <param name="goal_republish_hz" value="1.0"/>
+    <param name="goal_republish_hz" value="2.0"/>
     <param name="forward_sim_goal" value="false"/>
     <param name="lidar_min_range" value="1.2"/>
     <param name="publish_lidar" value="false"/>
@@ -62,6 +69,12 @@
   <param name="/ego_planner_node/grid_map/virtual_ceil_height" value="7.0"/>
   <param name="/ego_planner_node/grid_map/visualization_truncate_height" value="6.9"/>
   <param name="/ego_planner_node/grid_map/treat_out_of_map_as_free" value="true"/>
+  <param name="/ego_planner_node/fsm/keep_goal_velocity" value="true"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_scale" value="1.2"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_min" value="4.0"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_max" value="-1.0"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_reverse_cos_threshold" value="0.0"/>
+  <param name="/ego_planner_node/manager/max_jerk" value="8.0"/>
 
   <!-- 轨迹服务器 -->
   <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen">
@@ -79,14 +92,23 @@
   </node>
 
   <node pkg="ego_planner" name="rmua_route_goal_publisher" type="rmua_route_goal_publisher_node" output="screen">
-    <param name="route_file" value="$(env HOME)/MTY/egoplanner_study/src/full_scoring_track_early_uturn.csv"/>
+    <param name="route_file" value="$(env HOME)/MTY/egoplanner_study/src/rule_based_strict_route_full.csv"/>
     <param name="scoring_frames_file" value=""/>
-    <param name="reach_threshold" value="1.2"/>
-    <param name="publish_hz" value="2.0"/>
+    <param name="reach_threshold" value="$(arg route_reach_threshold)"/>
+    <param name="publish_hz" value="$(arg route_publish_hz)"/>
     <param name="start_order" value="1"/>
     <param name="reach_use_2d" value="true"/>
     <param name="align_initial_altitude" value="false"/>
-    <param name="publish_lookahead_distance" value="6.0"/>
+    <param name="progress_window_points" value="0"/>
+    <param name="progress_snap_dist" value="0.0"/>
+    <param name="publish_lookahead_distance" value="$(arg route_goal_lookahead_distance)"/>
+    <param name="publish_direct_waypoint" value="true"/>
+    <param name="direct_waypoint_window_points" value="$(arg route_direct_waypoint_window_points)"/>
+    <param name="min_publish_goal_distance" value="$(arg route_min_publish_goal_distance)"/>
+    <param name="passed_goal_projection_threshold" value="$(arg route_passed_goal_projection_threshold)"/>
+    <param name="passed_goal_lateral_threshold" value="$(arg route_passed_goal_lateral_threshold)"/>
+    <param name="same_goal_republish_period" value="0.8"/>
+    <param name="same_goal_republish_dist" value="0.0"/>
     <param name="frame_max_track_dist" value="2.0"/>
     <param name="frame_target_window_points" value="30"/>
     <param name="frame_blend_points_before" value="40"/>
