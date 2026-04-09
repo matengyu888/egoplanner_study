@@ -1,0 +1,26 @@
+<launch>
+  <arg name="rviz_config" default="$(find fast_livo)/rviz_cfg/fast_livo2.rviz"/>
+  <arg name="open_rviz" default="true"/>
+  <arg name="enable_fast_livo" default="false"/>
+  <arg name="enable_slam_bridge" default="false"/>
+  <arg name="fast_livo_launch" default=""/>
+
+  <include file="$(find ego_planner)/launch/run_in_rmua.launch"/>
+
+  <include if="$(arg enable_fast_livo)" file="$(arg fast_livo_launch)">
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <node if="$(eval arg('enable_fast_livo') or arg('enable_slam_bridge'))"
+        pkg="ego_planner"
+        type="rmua_slam_bridge_node"
+        name="rmua_slam_bridge"
+        output="screen"/>
+
+  <node if="$(arg open_rviz)"
+        pkg="rviz"
+        type="rviz"
+        name="rviz"
+        args="-d $(arg rviz_config)"
+        output="screen"/>
+</launch>

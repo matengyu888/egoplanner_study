@@ -1,0 +1,135 @@
+<launch>
+  <!-- RMUA 地图尺寸 -->
+  <arg name="map_size_x" value="100.0"/>
+  <arg name="map_size_y" value="100.0"/>
+  <arg name="map_size_z" value="8.0"/>
+
+  <!-- RMUA 适配后输出 -->
+  <arg name="odom_topic" value="/rmua/odom" />
+  <arg name="cloud_topic" value="/rmua/lidar" />
+  <arg name="route_reach_threshold" value="1.4" />
+  <arg name="route_publish_hz" value="6.0" />
+  <arg name="route_goal_lookahead_distance" value="0.0" />
+  <arg name="route_min_publish_goal_distance" value="0.0" />
+  <arg name="route_passed_goal_projection_threshold" value="0.4" />
+  <arg name="route_passed_goal_lateral_threshold" value="1.8" />
+  <arg name="route_direct_waypoint_window_points" value="50" />
+  <arg name="route_turn_guard_angle_deg" value="75.0" />
+  <arg name="route_turn_guard_distance" value="10.0" />
+
+  <!-- 主参数 -->
+  <include file="$(find ego_planner)/launch/advanced_param.xml">
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+
+    <!-- 关闭相机：给无效占位符，不启用 -->
+    <arg name="camera_pose_topic" value="/unused" />
+    <arg name="depth_topic" value="/unused" />
+    <arg name="cx" value="0" />
+    <arg name="cy" value="0" />
+    <arg name="fx" value="0" />
+    <arg name="fy" value="0" />
+
+    <!-- 雷达话题 -->
+    <arg name="cloud_topic" value="$(arg cloud_topic)" />
+
+    <arg name="max_vel" value="12.0" />
+    <arg name="max_acc" value="8.0" />
+    <arg name="planning_horizon" value="18.0" />
+    <arg name="flight_type" value="1" />
+
+    <arg name="point_num" value="5" />
+    <arg name="point0_x" value="-15.0" />
+    <arg name="point0_y" value="0.0" />
+    <arg name="point0_z" value="1.0" />
+    <arg name="point1_x" value="0.0" />
+    <arg name="point1_y" value="15.0" />
+    <arg name="point1_z" value="1.0" />
+    <arg name="point2_x" value="15.0" />
+    <arg name="point2_y" value="0.0" />
+    <arg name="point2_z" value="1.0" />
+    <arg name="point3_x" value="0.0" />
+    <arg name="point3_y" value="-15.0" />
+    <arg name="point3_z" value="1.0" />
+    <arg name="point4_x" value="-15.0" />
+    <arg name="point4_y" value="0.0" />
+    <arg name="point4_z" value="1.0" />
+  </include>
+
+  <node pkg="ego_planner" name="rmua_bridge" type="rmua_bridge_node" output="screen">
+    <param name="auto_takeoff" value="true"/>
+    <param name="goal_republish_hz" value="2.0"/>
+    <param name="forward_sim_goal" value="false"/>
+    <param name="lidar_min_range" value="1.2"/>
+    <param name="publish_lidar" value="false"/>
+  </node>
+
+  <param name="/ego_planner_node/grid_map/local_update_range_z" value="6.0"/>
+  <param name="/ego_planner_node/grid_map/max_ray_length" value="6.0"/>
+  <param name="/ego_planner_node/grid_map/virtual_ceil_height" value="7.0"/>
+  <param name="/ego_planner_node/grid_map/visualization_truncate_height" value="6.9"/>
+  <param name="/ego_planner_node/grid_map/treat_out_of_map_as_free" value="true"/>
+  <param name="/ego_planner_node/fsm/keep_goal_velocity" value="true"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_scale" value="1.10"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_min" value="3.0"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_max" value="-1.0"/>
+  <param name="/ego_planner_node/fsm/goal_velocity_reverse_cos_threshold" value="0.0"/>
+  <param name="/ego_planner_node/manager/max_jerk" value="12.0"/>
+
+  <!-- 轨迹服务器 -->
+  <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen">
+    <remap from="/position_cmd" to="/planning/pos_cmd"/>
+    <remap from="/odom_world" to="$(arg odom_topic)"/>
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_poscmd_bridge" type="rmua_poscmd_bridge_node" output="screen">
+    <remap from="~position_cmd_in" to="/planning/pos_cmd"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_vel_topic_bridge" type="rmua_vel_topic_bridge_node" output="screen">
+    <remap from="~vel_cmd_in" to="/airsim_node/drone_1/vel_body_cmd"/>
+  </node>
+
+  <node pkg="ego_planner" name="rmua_route_goal_publisher" type="rmua_route_goal_publisher_node" output="screen">
+    <param name="route_file" value="$(find ego_planner)/config/rmua/rule_based_strict_route_full.csv"/>
+    <param name="scoring_frames_file" value=""/>
+    <param name="reach_threshold" value="$(arg route_reach_threshold)"/>
+    <param name="publish_hz" value="$(arg route_publish_hz)"/>
+    <param name="start_order" value="1"/>
+    <param name="reach_use_2d" value="true"/>
+    <param name="align_initial_altitude" value="false"/>
+    <param name="progress_window_points" value="0"/>
+    <param name="progress_snap_dist" value="0.0"/>
+    <param name="publish_lookahead_distance" value="$(arg route_goal_lookahead_distance)"/>
+    <param name="publish_direct_waypoint" value="true"/>
+    <param name="direct_waypoint_window_points" value="$(arg route_direct_waypoint_window_points)"/>
+    <param name="min_publish_goal_distance" value="$(arg route_min_publish_goal_distance)"/>
+    <param name="passed_goal_projection_threshold" value="$(arg route_passed_goal_projection_threshold)"/>
+    <param name="passed_goal_lateral_threshold" value="$(arg route_passed_goal_lateral_threshold)"/>
+    <param name="turn_guard_angle_deg" value="$(arg route_turn_guard_angle_deg)"/>
+    <param name="turn_guard_distance" value="$(arg route_turn_guard_distance)"/>
+    <param name="same_goal_republish_period" value="0.8"/>
+    <param name="same_goal_republish_dist" value="0.0"/>
+    <param name="frame_max_track_dist" value="2.0"/>
+    <param name="frame_target_window_points" value="30"/>
+    <param name="frame_blend_points_before" value="40"/>
+    <param name="frame_blend_points_after" value="8"/>
+    <param name="frame_max_xy_offset" value="0.6"/>
+    <param name="frame_max_z_offset_up" value="1.8"/>
+    <param name="frame_max_z_offset_down" value="0.0"/>
+    <param name="frame_z_blend_points_before" value="90"/>
+    <param name="frame_z_blend_points_after" value="16"/>
+  </node>
+
+  <!-- 航点生成器 -->
+  <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~goal" to="/move_base_simple/goal"/>
+    <remap from="~traj_start_trigger" to="/traj_start_trigger" />
+    <param name="waypoint_type" value="manual-lonely-waypoint"/>
+  </node>
+
+</launch>
