@@ -1,10 +1,13 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <tf/transform_broadcaster.h>
+#include <tf/transform_datatypes.h>
 
 #include <airsim_ros/Takeoff.h>
 
@@ -35,18 +38,35 @@ public:
     nh_.param("forward_sim_goal", forward_sim_goal_, true);
     nh_.param("lidar_min_range", lidar_min_range_, 1.2);
     nh_.param("publish_lidar", publish_lidar_, true);
+    nh_.param<std::string>("pose_topic_in", pose_topic_in_, "/airsim_node/drone_1/debug/pose_gt");
+    nh_.param<std::string>("init_pose_topic_in", init_pose_topic_in_, "/airsim_node/initial_pose");
+    nh_.param<std::string>("goal_topic_in", goal_topic_in_, "/airsim_node/end_goal");
+    nh_.param<std::string>("lidar_topic_in", lidar_topic_in_, "/airsim_node/drone_1/lidar");
+    nh_.param<std::string>("odom_topic_out", odom_topic_out_, "/rmua/odom");
+    nh_.param<std::string>("pose_topic_out", pose_topic_out_, "/rmua_truth/pose");
+    nh_.param<std::string>("pose_world_topic_out", pose_world_topic_out_, "/airsim_node/drone_1/debug/pose_gt_world");
+    nh_.param<std::string>("truth_odom_topic_out", truth_odom_topic_out_, "/rmua_truth/odom");
+    nh_.param<std::string>("truth_path_topic_out", truth_path_topic_out_, "/rmua_truth/path");
+    nh_.param<std::string>("goal_topic_out", goal_topic_out_, "/move_base_simple/goal");
+    nh_.param<std::string>("lidar_topic_out", lidar_topic_out_, "/rmua/lidar");
+    nh_.param<std::string>("world_frame_id", world_frame_id_, "world");
+    nh_.param<std::string>("body_frame_id", body_frame_id_, "base_link");
 
-    pose_sub_ = nh_.subscribe("/airsim_node/drone_1/debug/pose_gt", 50, &RmuaBridge::poseCallback, this);
-    // pose_sub_ = nh_.subscribe("/uav/state/pose", 50, &RmuaBridge::poseCallback, this);
-    init_pose_sub_ = nh_.subscribe("/airsim_node/initial_pose", 1, &RmuaBridge::initPoseCallback, this);
+    pose_sub_ = nh_.subscribe(pose_topic_in_, 50, &RmuaBridge::poseCallback, this);
+    init_pose_sub_ = nh_.subscribe(init_pose_topic_in_, 1, &RmuaBridge::initPoseCallback, this);
     if (forward_sim_goal_)
-      goal_sub_ = nh_.subscribe("/airsim_node/end_goal", 1, &RmuaBridge::goalCallback, this);
+      goal_sub_ = nh_.subscribe(goal_topic_in_, 1, &RmuaBridge::goalCallback, this);
     if (publish_lidar_)
-      lidar_sub_ = nh_.subscribe("/airsim_node/drone_1/lidar", 5, &RmuaBridge::lidarCallback, this);
+      lidar_sub_ = nh_.subscribe(lidar_topic_in_, 5, &RmuaBridge::lidarCallback, this);
 
-    odom_pub_ = nh_.advertise<nav_msgs::Odometry>("/rmua/odom", 50);
-    goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 10);
-    lidar_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/rmua/lidar", 5);
+    odom_pub_ = nh_.advertise<nav_msgs::Odometry>(odom_topic_out_, 50);
+    truth_pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_topic_out_, 50);
+    truth_pose_world_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_world_topic_out_, 50);
+    truth_odom_pub_ = nh_.advertise<nav_msgs::Odometry>(truth_odom_topic_out_, 50);
+    truth_path_pub_ = nh_.advertise<nav_msgs::Path>(truth_path_topic_out_, 10);
+    goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(goal_topic_out_, 10);
+    lidar_pub_ = nh_.advertise<sensor_msgs::PointCloud2>(lidar_topic_out_, 5);
+    truth_path_msg_.header.frame_id = world_frame_id_;
 
     takeoff_client_ = nh_.serviceClient<airsim_ros::Takeoff>("/airsim_node/drone_1/takeoff");
     goal_timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.1, goal_republish_hz_)), &RmuaBridge::goalTimerCallback, this);
@@ -74,7 +94,7 @@ private:
   void goalCallback(const geometry_msgs::PoseStampedConstPtr& msg)
   {
     latest_goal_ = *msg;
-    latest_goal_.header.frame_id = "world";
+    latest_goal_.header.frame_id = world_frame_id_;
     latest_goal_.pose.position.x = msg->pose.position.x;
     latest_goal_.pose.position.y = msg->pose.position.y;
     latest_goal_.pose.position.z = -msg->pose.position.z;
@@ -107,8 +127,8 @@ private:
 
     nav_msgs::Odometry odom;
     odom.header.stamp = stamp;
-    odom.header.frame_id = "world";
-    odom.child_frame_id = "base_link";
+    odom.header.frame_id = world_frame_id_;
+    odom.child_frame_id = body_frame_id_;
 
     const Eigen::Vector3d pos = simToPlanner(pos_sim);
     const Eigen::Quaterniond q = simToPlanner(q_sim);
@@ -147,9 +167,30 @@ private:
     current_pos_ = pos;
     current_q_ = q;
     have_current_pose_ = true;
+
+    geometry_msgs::PoseStamped truth_pose;
+    truth_pose.header.stamp = stamp;
+    truth_pose.header.frame_id = world_frame_id_;
+    truth_pose.pose = odom.pose.pose;
+
+    nav_msgs::Odometry truth_odom = odom;
+
+    truth_path_msg_.header.stamp = stamp;
+    truth_path_msg_.poses.push_back(truth_pose);
+
+    tf::Transform transform;
+    transform.setOrigin(tf::Vector3(pos.x(), pos.y(), pos.z()));
+    tf::Quaternion tf_q(q.x(), q.y(), q.z(), q.w());
+    transform.setRotation(tf_q);
+    tf_br_.sendTransform(tf::StampedTransform(transform, stamp, world_frame_id_, body_frame_id_));
+
     ROS_INFO_THROTTLE(1.0, "RMUA bridge pose callback: sim=(%.2f, %.2f, %.2f) planner=(%.2f, %.2f, %.2f)",
                       msg->pose.position.x, msg->pose.position.y, msg->pose.position.z, pos.x(), pos.y(), pos.z());
     odom_pub_.publish(odom);
+    truth_pose_pub_.publish(truth_pose);
+    truth_pose_world_pub_.publish(truth_pose);
+    truth_odom_pub_.publish(truth_odom);
+    truth_path_pub_.publish(truth_path_msg_);
   }
 
   void lidarCallback(const sensor_msgs::PointCloud2ConstPtr& msg)
@@ -180,7 +221,7 @@ private:
     sensor_msgs::PointCloud2 out;
     pcl::toROSMsg(filtered, out);
     out.header.stamp = msg->header.stamp;
-    out.header.frame_id = "world";
+    out.header.frame_id = world_frame_id_;
     lidar_pub_.publish(out);
   }
 
@@ -190,10 +231,16 @@ private:
   ros::Subscriber goal_sub_;
   ros::Subscriber lidar_sub_;
   ros::Publisher odom_pub_;
+  ros::Publisher truth_pose_pub_;
+  ros::Publisher truth_pose_world_pub_;
+  ros::Publisher truth_odom_pub_;
+  ros::Publisher truth_path_pub_;
   ros::Publisher goal_pub_;
   ros::Publisher lidar_pub_;
   ros::ServiceClient takeoff_client_;
   ros::Timer goal_timer_;
+  tf::TransformBroadcaster tf_br_;
+  nav_msgs::Path truth_path_msg_;
 
   bool auto_takeoff_{true};
   bool forward_sim_goal_{true};
@@ -204,6 +251,19 @@ private:
   bool have_current_pose_{false};
   double goal_republish_hz_{1.0};
   double lidar_min_range_{1.2};
+  std::string pose_topic_in_;
+  std::string init_pose_topic_in_;
+  std::string goal_topic_in_;
+  std::string lidar_topic_in_;
+  std::string odom_topic_out_;
+  std::string pose_topic_out_;
+  std::string pose_world_topic_out_;
+  std::string truth_odom_topic_out_;
+  std::string truth_path_topic_out_;
+  std::string goal_topic_out_;
+  std::string lidar_topic_out_;
+  std::string world_frame_id_;
+  std::string body_frame_id_;
   ros::Time last_stamp_;
   Eigen::Vector3d last_pos_{Eigen::Vector3d::Zero()};
   Eigen::Quaterniond last_q_{Eigen::Quaterniond::Identity()};

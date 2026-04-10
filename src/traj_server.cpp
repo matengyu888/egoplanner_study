@@ -1,5 +1,6 @@
 #include "bspline_opt/uniform_bspline.h"
 #include "nav_msgs/Odometry.h"
+#include "nav_msgs/Path.h"
 #include "ego_planner/Bspline.h"
 #include "quadrotor_msgs/PositionCommand.h"
 #include "std_msgs/Empty.h"
@@ -7,6 +8,7 @@
 #include <ros/ros.h>
 
 ros::Publisher pos_cmd_pub;
+ros::Publisher bspline_path_pub;
 
 quadrotor_msgs::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -23,6 +25,41 @@ int traj_id_;
 // yaw control
 double last_yaw_, last_yaw_dot_;
 double time_forward_;
+
+void publishBsplinePath()
+{
+  if (!receive_traj_ || traj_.empty())
+    return;
+
+  nav_msgs::Path path_msg;
+  path_msg.header.stamp = ros::Time::now();
+  path_msg.header.frame_id = "world";
+
+  const double duration = std::max(0.0, traj_duration_);
+  const double sample_dt = std::max(0.03, std::min(0.10, duration / 200.0));
+
+  for (double t = 0.0; t <= duration + 1e-6; t += sample_dt)
+  {
+    const Eigen::Vector3d pos = traj_[0].evaluateDeBoorT(std::min(t, duration));
+    geometry_msgs::PoseStamped pose;
+    pose.header = path_msg.header;
+    pose.pose.position.x = pos.x();
+    pose.pose.position.y = pos.y();
+    pose.pose.position.z = pos.z();
+    pose.pose.orientation.w = 1.0;
+    path_msg.poses.push_back(pose);
+  }
+
+  if (path_msg.poses.empty() || std::fabs(duration) <= 1e-6)
+  {
+    geometry_msgs::PoseStamped pose;
+    pose.header = path_msg.header;
+    pose.pose.orientation.w = 1.0;
+    path_msg.poses.push_back(pose);
+  }
+
+  bspline_path_pub.publish(path_msg);
+}
 
 void bsplineCallback(ego_planner::BsplineConstPtr msg)
 {
@@ -66,6 +103,7 @@ void bsplineCallback(ego_planner::BsplineConstPtr msg)
   traj_duration_ = traj_[0].getTimeSum();
 
   receive_traj_ = true;
+  publishBsplinePath();
 }
 
 std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros::Time &time_now, ros::Time &time_last)
@@ -242,6 +280,7 @@ int main(int argc, char **argv)
   ros::Subscriber bspline_sub = node.subscribe("planning/bspline", 10, bsplineCallback);
 
   pos_cmd_pub = node.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
+  bspline_path_pub = node.advertise<nav_msgs::Path>("/planning/bspline_path", 10, true);
 
   ros::Timer cmd_timer = node.createTimer(ros::Duration(0.01), cmdCallback);
 

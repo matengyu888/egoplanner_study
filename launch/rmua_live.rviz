@@ -80,6 +80,22 @@ Visualization Manager:
             "": true
           Queue Size: 100
           Value: true
+        - Class: rviz/Marker
+          Enabled: true
+          Marker Topic: /ego_planner_node/global_list
+          Name: global_traj
+          Namespaces:
+            "": true
+          Queue Size: 100
+          Value: true
+        - Class: rviz/Marker
+          Enabled: false
+          Marker Topic: /ego_planner_node/init_list
+          Name: init_traj
+          Namespaces:
+            "": true
+          Queue Size: 100
+          Value: false
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
@@ -102,6 +118,30 @@ Visualization Manager:
           Shaft Diameter: 0.10000000149011612
           Shaft Length: 0.10000000149011612
           Topic: /waypoint_generator/waypoints
+          Unreliable: false
+          Value: true
+        - Alpha: 1
+          Buffer Length: 1
+          Class: rviz/Path
+          Color: 0; 255; 0
+          Enabled: true
+          Head Diameter: 0.30000001192092896
+          Head Length: 0.20000000298023224
+          Length: 0.30000001192092896
+          Line Style: Lines
+          Line Width: 0.07999999821186066
+          Name: local_bspline
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0
+          Pose Color: 0; 255; 0
+          Pose Style: None
+          Queue Size: 10
+          Radius: 0.029999999329447746
+          Shaft Diameter: 0.10000000149011612
+          Shaft Length: 0.10000000149011612
+          Topic: /planning/bspline_path
           Unreliable: false
           Value: true
         - Alpha: 1
@@ -235,6 +275,62 @@ Visualization Manager:
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
+          Value: true
+        - Alpha: 0.550000011920929
+          Autocompute Intensity Bounds: true
+          Autocompute Value Bounds:
+            Max Value: -9999
+            Min Value: 9999
+            Value: true
+          Axis: Z
+          Channel Name: intensity
+          Class: rviz/PointCloud2
+          Color: 255; 0; 0
+          Color Transformer: FlatColor
+          Decay Time: 0
+          Enabled: true
+          Invert Rainbow: false
+          Max Color: 255; 255; 255
+          Min Color: 0; 0; 0
+          Name: occupancy_raw
+          Position Transformer: XYZ
+          Queue Size: 10
+          Selectable: true
+          Size (Pixels): 3
+          Size (m): 0.07999999821186066
+          Style: Boxes
+          Topic: /grid_map/occupancy
+          Unreliable: false
+          Use Fixed Frame: true
+          Use rainbow: false
+          Value: true
+        - Alpha: 0.30000001192092896
+          Autocompute Intensity Bounds: true
+          Autocompute Value Bounds:
+            Max Value: -9999
+            Min Value: 9999
+            Value: true
+          Axis: Z
+          Channel Name: intensity
+          Class: rviz/PointCloud2
+          Color: 170; 170; 255
+          Color Transformer: FlatColor
+          Decay Time: 0
+          Enabled: false
+          Invert Rainbow: false
+          Max Color: 255; 255; 255
+          Min Color: 0; 0; 0
+          Name: occupancy_unknown
+          Position Transformer: XYZ
+          Queue Size: 10
+          Selectable: true
+          Size (Pixels): 3
+          Size (m): 0.07999999821186066
+          Style: Flat Squares
+          Topic: /grid_map/unknown
+          Unreliable: false
+          Use Fixed Frame: true
+          Use rainbow: false
           Value: false
       Enabled: true
       Name: Mapping
@@ -536,6 +632,22 @@ Visualization Manager:
       Topic: /rmua_truth/pose
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Axes Length: 0.8
+      Axes Radius: 0.08
+      Class: rviz/Pose
+      Color: 170; 255; 255
+      Enabled: true
+      Head Length: 0.25
+      Head Radius: 0.1
+      Name: pose_gt_world
+      Queue Size: 10
+      Shaft Length: 0.6
+      Shaft Radius: 0.04
+      Shape: Arrow
+      Topic: /airsim_node/drone_1/debug/pose_gt_world
+      Unreliable: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
@@ -563,8 +675,8 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/Orbit
-      Distance: 4.581528663635254
+      Class: rviz/ThirdPersonFollower
+      Distance: 12
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -572,17 +684,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 121.79740142822266
-        Y: 31.779104232788086
-        Z: 53.844581604003906
+        X: 0
+        Y: 0
+        Z: 0
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5400005578994751
-      Target Frame: world
-      Yaw: 0.6049942374229431
+      Pitch: 0.35
+      Target Frame: base_link
+      Yaw: 0.0
     Saved: ~
 Window Geometry:
   Displays:

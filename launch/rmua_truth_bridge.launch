@@ -1,0 +1,35 @@
+<launch>
+  <arg name="auto_takeoff" default="false"/>
+  <arg name="forward_sim_goal" default="false"/>
+  <arg name="goal_republish_hz" default="1.0"/>
+  <arg name="lidar_min_range" default="1.2"/>
+  <arg name="publish_lidar" default="true"/>
+
+  <arg name="pose_topic_out" default="/uav/state/pose"/>
+  <arg name="odom_topic_out" default="/uav/state/odom"/>
+  <arg name="path_topic_out" default="/uav/state/path"/>
+  <arg name="lidar_topic_out" default="/cloud_registered"/>
+
+  <node pkg="ego_planner" name="rmua_truth_bridge" type="rmua_bridge_node" output="screen">
+    <param name="auto_takeoff" value="$(arg auto_takeoff)"/>
+    <param name="forward_sim_goal" value="$(arg forward_sim_goal)"/>
+    <param name="goal_republish_hz" value="$(arg goal_republish_hz)"/>
+    <param name="lidar_min_range" value="$(arg lidar_min_range)"/>
+    <param name="publish_lidar" value="$(arg publish_lidar)"/>
+
+    <param name="pose_topic_in" value="/airsim_node/drone_1/debug/pose_gt"/>
+    <param name="init_pose_topic_in" value="/airsim_node/initial_pose"/>
+    <param name="goal_topic_in" value="/airsim_node/end_goal"/>
+    <param name="lidar_topic_in" value="/airsim_node/drone_1/lidar"/>
+
+    <param name="pose_topic_out" value="$(arg pose_topic_out)"/>
+    <param name="odom_topic_out" value="$(arg odom_topic_out)"/>
+    <param name="truth_path_topic_out" value="$(arg path_topic_out)"/>
+    <param name="lidar_topic_out" value="$(arg lidar_topic_out)"/>
+    <param name="truth_odom_topic_out" value="/uav/state/truth_odom"/>
+    <param name="pose_world_topic_out" value="/uav/state/pose_gt_world"/>
+    <param name="goal_topic_out" value="/move_base_simple/goal"/>
+    <param name="world_frame_id" value="world"/>
+    <param name="body_frame_id" value="base_link"/>
+  </node>
+</launch>

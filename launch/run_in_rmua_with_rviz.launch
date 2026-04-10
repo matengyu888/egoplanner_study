@@ -1,5 +1,5 @@
 <launch>
-  <arg name="rviz_config" default="$(find fast_livo)/rviz_cfg/fast_livo2.rviz"/>
+  <arg name="rviz_config" default="$(find ego_planner)/launch/rmua_live.rviz"/>
   <arg name="open_rviz" default="true"/>
   <arg name="enable_fast_livo" default="false"/>
   <arg name="enable_slam_bridge" default="false"/>

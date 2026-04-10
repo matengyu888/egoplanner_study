@@ -45,6 +45,7 @@ public:
   explicit RmuaRouteGoalPublisher(ros::NodeHandle& nh) : nh_(nh)
   {
     nh_.param<std::string>("route_file", route_file_, "");
+    nh_.param<std::string>("odom_topic", odom_topic_, "/rmua/odom");
     nh_.param("reach_threshold", reach_threshold_, 4.0);
     nh_.param("publish_hz", publish_hz_, 1.0);
     nh_.param("start_order", start_order_, 1);
@@ -87,7 +88,7 @@ public:
       ++start_index;
     current_index_ = std::min(start_index, static_cast<int>(goals_.size()) - 1);
 
-    odom_sub_ = nh_.subscribe("/rmua/odom", 20, &RmuaRouteGoalPublisher::odomCallback, this);
+    odom_sub_ = nh_.subscribe(odom_topic_, 20, &RmuaRouteGoalPublisher::odomCallback, this);
     goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 10, true);
     direct_waypoint_pub_ = nh_.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 10, true);
     timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.1, publish_hz_)), &RmuaRouteGoalPublisher::timerCallback, this);
@@ -681,6 +682,7 @@ private:
   ros::Timer timer_;
 
   std::string route_file_;
+  std::string odom_topic_;
   double reach_threshold_{4.0};
   double publish_hz_{1.0};
   int start_order_{1};
